@@ -1,118 +1,155 @@
 import streamlit as st
-import csv
-import heapq
-from collections import defaultdict
+import pandas as pd
+import numpy as np
 
 class Airport:
-    def __init__(self, id, name, city, country):
+    def __init__(self, id, name, city, jry):
         self.id = id
         self.name = name
         self.city = city
-        self.country = country
+        self.jry = jry
 
-class FlightGraph:
-    def __init__(self):
+class Route:
+    def __init__(self, source_id, destination_id, distance, cost=0, time=0):
+        self.source_id = source_id
+        self.destination_id = destination_id
+        self.distance = distance
+        self.cost = cost
+        self.time = time
+
+class FlightSystem:
+    def __init__(self, max_airports):
+        self.max_airports = max_airports
         self.airports = {}
-        self.adjacency_list = defaultdict(list)
+        self.routes = {}
 
-    def load_airports_from_csv(self, file_name):
-        try:
-            with open(file_name, mode='r') as file:
-                reader = csv.reader(file)
-                for row in reader:
-                    if len(row) < 4 or not row[0].isdigit():
-                        continue
-                    id = int(row[0])
-                    self.add_airport(id, row[1], row[2], row[3])
-            st.success("Airports loaded successfully.")
-        except Exception as e:
-            st.error(f"Error loading airports: {e}")
-
-    def add_airport(self, id, name, city, country):
+    def add_airport(self, id, name, city, jry):
         if id in self.airports:
-            st.error("Airport ID already exists!")
-        else:
-            self.airports[id] = Airport(id, name, city, country)
-            st.success("Airport added successfully.")
-
-    def add_route(self, source_id, dest_id, distance, cost, time):
-        if source_id not in self.airports or dest_id not in self.airports:
-            st.error("Invalid airport IDs!")
-        else:
-            self.adjacency_list[source_id].append((dest_id, distance, cost, time))
-            st.success("Route added successfully.")
-
-    def dijkstra(self, start_id, dest_id, criterion):
-        if start_id not in self.airports or dest_id not in self.airports:
-            st.error("Invalid airport IDs!")
+            st.error("Error: Airport ID already exists!")
             return
-        criteria_index = {"distance": 1, "cost": 2, "time": 3}
-        if criterion not in criteria_index:
-            st.error("Invalid criterion!")
+        self.airports[id] = Airport(id, name, city, jry)
+        st.success(f"Airport '{name}' added successfully.")
+
+    def add_route(self, source_id, destination_id, distance, cost=0, time=0):
+        if source_id not in self.airports or destination_id not in self.airports:
+            st.error("Error: One or both airports do not exist!")
             return
-        
-        index = criteria_index[criterion]
+        if (source_id, destination_id) in self.routes:
+            st.error("Error: Route already exists!")
+            return
+        self.routes[(source_id, destination_id)] = Route(source_id, destination_id, distance, cost, time)
+        st.success(f"Route from {source_id} to {destination_id} added successfully.")
+
+    def find_shortest_path(self, start_id, end_id, optimize_cost=False, optimize_time=False):
+        from heapq import heappop, heappush
+
         distances = {id: float('inf') for id in self.airports}
-        previous = {id: None for id in self.airports}
         distances[start_id] = 0
+        previous = {id: None for id in self.airports}
         pq = [(0, start_id)]
 
         while pq:
-            current_distance, current_id = heapq.heappop(pq)
+            current_distance, current_id = heappop(pq)
+            if current_id == end_id:
+                break
             if current_distance > distances[current_id]:
                 continue
-            for neighbor, dist, cost, time in self.adjacency_list[current_id]:
-                weight = [dist, cost, time][index - 1]
-                new_distance = current_distance + weight
-                if new_distance < distances[neighbor]:
-                    distances[neighbor] = new_distance
-                    previous[neighbor] = current_id
-                    heapq.heappush(pq, (new_distance, neighbor))
 
-        if distances[dest_id] == float('inf'):
-            st.warning("No path exists!")
+            for (source, destination), route in self.routes.items():
+                if source != current_id:
+                    continue
+                weight = route.distance
+                if optimize_cost:
+                    weight = route.cost
+                elif optimize_time:
+                    weight = route.time
+
+                distance = current_distance + weight
+                if distance < distances[destination]:
+                    distances[destination] = distance
+                    previous[destination] = current_id
+                    heappush(pq, (distance, destination))
+
+        path = []
+        current = end_id
+        while current is not None:
+            path.append(current)
+            current = previous[current]
+        path.reverse()
+
+        if distances[end_id] == float('inf'):
+            st.warning("No path found.")
         else:
-            path = []
-            current = dest_id
-            while current:
-                path.append(self.airports[current].name)
-                current = previous[current]
-            path.reverse()
-            st.success(f"Optimal {criterion}: {distances[dest_id]}")
-            st.info(" -> ".join(path))
+            st.success(f"Shortest path: {' -> '.join(map(str, path))}")
+            st.write(f"Total Distance: {distances[end_id]}")
+
+    def save_routes(self, filename):
+        data = [{
+            "Source": src,
+            "Destination": dest,
+            "Distance": route.distance,
+            "Cost": route.cost,
+            "Time": route.time
+        } for (src, dest), route in self.routes.items()]
+        pd.DataFrame(data).to_csv(filename, index=False)
+        st.success(f"Routes saved to {filename}.")
+
+    def load_routes(self, filename):
+        try:
+            data = pd.read_csv(filename)
+            for _, row in data.iterrows():
+                self.add_route(int(row["Source"]), int(row["Destination"]),
+                               float(row["Distance"]), float(row["Cost"]), float(row["Time"]))
+            st.success(f"Routes loaded from {filename}.")
+        except Exception as e:
+            st.error(f"Error: {e}")
 
 # Streamlit Interface
 st.title("Flight Route Optimization System")
-graph = FlightGraph()
 
-st.sidebar.header("Options")
-option = st.sidebar.selectbox("Choose an option", ["Load Airports", "Add Airport", "Add Route", "Find Optimal Path"])
+flight_system = FlightSystem(max_airports=1000)
 
-if option == "Load Airports":
-    uploaded_file = st.file_uploader("Upload CSV file")
-    if uploaded_file:
-        graph.load_airports_from_csv(uploaded_file)
+menu = ["Add Airport", "Add Route", "Find Path", "Save/Load Routes"]
+choice = st.sidebar.selectbox("Menu", menu)
 
-elif option == "Add Airport":
+if choice == "Add Airport":
+    st.subheader("Add Airport")
     id = st.number_input("Airport ID", min_value=0, step=1)
     name = st.text_input("Airport Name")
     city = st.text_input("City")
-    country = st.text_input("Country")
+    jry = st.text_input("Jurisdiction")
     if st.button("Add Airport"):
-        graph.add_airport(id, name, city, country)
+        flight_system.add_airport(id, name, city, jry)
 
-elif option == "Add Route":
+elif choice == "Add Route":
+    st.subheader("Add Route")
     source = st.number_input("Source Airport ID", min_value=0, step=1)
     dest = st.number_input("Destination Airport ID", min_value=0, step=1)
-    distance = st.number_input("Distance", min_value=0.0)
-    cost = st.number_input("Cost", min_value=0.0)
-    time = st.number_input("Time", min_value=0.0)
+    distance = st.number_input("Distance", min_value=0.0, step=0.1)
+    cost = st.number_input("Cost", min_value=0.0, step=0.1)
+    time = st.number_input("Time", min_value=0.0, step=0.1)
     if st.button("Add Route"):
-        graph.add_route(source, dest, distance, cost, time)
+        flight_system.add_route(source, dest, distance, cost, time)
 
-elif option == "Find Optimal Path":
-    source = st.number_input("Source Airport ID", min_value=0, step=1)
-    dest = st.number_input("Destination Airport ID", min_value=0, step=1)
-    criterion = st.selectbox("Criterion", ["distance", "cost", "time"])
+elif choice == "Find Path":
+    st.subheader("Find Path")
+    start = st.number_input("Starting Airport ID", min_value=0, step=1)
+    end = st.number_input("Destination Airport ID", min_value=0, step=1)
+    optimize = st.radio("Optimize for", ["Distance", "Cost", "Time"])
     if st.button("Find Path"):
-        graph.dijkstra(source, dest, criterion)
+        if optimize == "Distance":
+            flight_system.find_shortest_path(start, end)
+        elif optimize == "Cost":
+            flight_system.find_shortest_path(start, end, optimize_cost=True)
+        elif optimize == "Time":
+            flight_system.find_shortest_path(start, end, optimize_time=True)
+
+elif choice == "Save/Load Routes":
+    st.subheader("Save or Load Routes")
+    save_filename = st.text_input("Save filename")
+    if st.button("Save Routes"):
+        flight_system.save_routes(save_filename)
+
+    load_filename = st.text_input("Load filename")
+    if st.button("Load Routes"):
+        flight_system.load_routes(load_filename)
