@@ -24,11 +24,14 @@ class FlightSystem:
         self.routes = {}
 
     def add_airport(self, id, name, city, jry):
+        if not name or not city or not jry:
+            st.error("Error: All fields are required.")
+            return
         if id in self.airports:
-            st.error("Error: Airport ID already exists!")
+            st.error(f"Error: Airport with ID {id} already exists!")
             return
         self.airports[id] = Airport(id, name, city, jry)
-        st.success(f"Airport '{name}' added successfully.")
+        st.success(f"Airport '{name}' added successfully with ID {id}.")
 
     def add_route(self, source_id, destination_id, distance, cost=0, time=0):
         if source_id not in self.airports or destination_id not in self.airports:
@@ -109,17 +112,21 @@ st.title("Flight Route Optimization System")
 
 flight_system = FlightSystem(max_airports=1000)
 
-menu = ["Add Airport", "Add Route", "Find Path", "Save/Load Routes"]
+menu = ["Add Airport", "Add Route", "Find Path", "Save/Load Routes", "View Airports"]
 choice = st.sidebar.selectbox("Menu", menu)
 
 if choice == "Add Airport":
     st.subheader("Add Airport")
     id = st.number_input("Airport ID", min_value=0, step=1)
-    name = st.text_input("Airport Name")
-    city = st.text_input("City")
-    jry = st.text_input("Jurisdiction")
+    name = st.text_input("Airport Name").strip()
+    city = st.text_input("City").strip()
+    jry = st.text_input("Jurisdiction").strip()
+
     if st.button("Add Airport"):
-        flight_system.add_airport(id, name, city, jry)
+        if id >= 0 and name and city and jry:
+            flight_system.add_airport(int(id), name, city, jry)
+        else:
+            st.error("Error: Please fill out all fields correctly.")
 
 elif choice == "Add Route":
     st.subheader("Add Route")
@@ -153,3 +160,11 @@ elif choice == "Save/Load Routes":
     load_filename = st.text_input("Load filename")
     if st.button("Load Routes"):
         flight_system.load_routes(load_filename)
+
+elif choice == "View Airports":
+    st.subheader("View Airports")
+    if flight_system.airports:
+        for airport_id, airport in flight_system.airports.items():
+            st.write(f"ID: {airport_id}, Name: {airport.name}, City: {airport.city}, Jurisdiction: {airport.jry}")
+    else:
+        st.info("No airports added yet.")
