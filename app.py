@@ -1,170 +1,169 @@
-import streamlit as st
 import pandas as pd
-import numpy as np
+import sys
+import math
 
 class Airport:
-    def __init__(self, id, name, city, jry):
-        self.id = id
+    def __init__(self, airport_id, name, city, country):
+        self.id = airport_id
         self.name = name
         self.city = city
-        self.jry = jry
+        self.country = country
 
-class Route:
-    def __init__(self, source_id, destination_id, distance, cost=0, time=0):
-        self.source_id = source_id
-        self.destination_id = destination_id
+class AdjNode:
+    def __init__(self, airport_id, distance, cost, time):
+        self.airport_id = airport_id
         self.distance = distance
         self.cost = cost
         self.time = time
+        self.next = None
 
-class FlightSystem:
+class AdjList:
+    def __init__(self):
+        self.head = None
+
+class FlightGraph:
     def __init__(self, max_airports):
-        self.max_airports = max_airports
-        self.airports = {}
-        self.routes = {}
+        self.num_airports = max_airports
+        self.adjacency_list = [AdjList() for _ in range(max_airports)]
+        self.airports = [None] * max_airports
 
-    def add_airport(self, id, name, city, jry):
-        if not name or not city or not jry:
-            st.error("Error: All fields are required.")
-            return
-        if id in self.airports:
-            st.error(f"Error: Airport with ID {id} already exists!")
-            return
-        self.airports[id] = Airport(id, name, city, jry)
-        st.success(f"Airport '{name}' added successfully with ID {id}.")
-
-    def add_route(self, source_id, destination_id, distance, cost=0, time=0):
-        if source_id not in self.airports or destination_id not in self.airports:
-            st.error("Error: One or both airports do not exist!")
-            return
-        if (source_id, destination_id) in self.routes:
-            st.error("Error: Route already exists!")
-            return
-        self.routes[(source_id, destination_id)] = Route(source_id, destination_id, distance, cost, time)
-        st.success(f"Route from {source_id} to {destination_id} added successfully.")
-
-    def find_shortest_path(self, start_id, end_id, optimize_cost=False, optimize_time=False):
-        from heapq import heappop, heappush
-
-        distances = {id: float('inf') for id in self.airports}
-        distances[start_id] = 0
-        previous = {id: None for id in self.airports}
-        pq = [(0, start_id)]
-
-        while pq:
-            current_distance, current_id = heappop(pq)
-            if current_id == end_id:
-                break
-            if current_distance > distances[current_id]:
-                continue
-
-            for (source, destination), route in self.routes.items():
-                if source != current_id:
-                    continue
-                weight = route.distance
-                if optimize_cost:
-                    weight = route.cost
-                elif optimize_time:
-                    weight = route.time
-
-                distance = current_distance + weight
-                if distance < distances[destination]:
-                    distances[destination] = distance
-                    previous[destination] = current_id
-                    heappush(pq, (distance, destination))
-
-        path = []
-        current = end_id
-        while current is not None:
-            path.append(current)
-            current = previous[current]
-        path.reverse()
-
-        if distances[end_id] == float('inf'):
-            st.warning("No path found.")
-        else:
-            st.success(f"Shortest path: {' -> '.join(map(str, path))}")
-            st.write(f"Total Distance: {distances[end_id]}")
-
-    def save_routes(self, filename):
-        data = [{
-            "Source": src,
-            "Destination": dest,
-            "Distance": route.distance,
-            "Cost": route.cost,
-            "Time": route.time
-        } for (src, dest), route in self.routes.items()]
-        pd.DataFrame(data).to_csv(filename, index=False)
-        st.success(f"Routes saved to {filename}.")
-
-    def load_routes(self, filename):
+    def load_airports_from_csv(self, file_name):
         try:
-            data = pd.read_csv(filename)
-            for _, row in data.iterrows():
-                self.add_route(int(row["Source"]), int(row["Destination"]),
-                               float(row["Distance"]), float(row["Cost"]), float(row["Time"]))
-            st.success(f"Routes loaded from {filename}.")
-        except Exception as e:
-            st.error(f"Error: {e}")
+            df = pd.read_csv(file_name)
+            for _, row in df.iterrows():
+                if not str(row['id']).isdigit():
+                    print(f"Skipping invalid entry: {row}")
+                    continue
 
-# Streamlit Interface
-st.title("Flight Route Optimization System")
+                airport_id = int(row['id'])
+                self.add_airport(
+                    airport_id, row['name'], row['city'], row['country']
+                )
 
-flight_system = FlightSystem(max_airports=1000)
+            print(f"Airports loaded successfully from {file_name}")
+        except FileNotFoundError:
+            print(f"Error: Could not open file {file_name}")
 
-menu = ["Add Airport", "Add Route", "Find Path", "Save/Load Routes", "View Airports"]
-choice = st.sidebar.selectbox("Menu", menu)
+    def add_airport(self, airport_id, name, city, country):
+        if airport_id >= self.num_airports or airport_id < 0:
+            print("Error: Invalid Airport ID!")
+            return
 
-if choice == "Add Airport":
-    st.subheader("Add Airport")
-    id = st.number_input("Airport ID", min_value=0, step=1)
-    name = st.text_input("Airport Name").strip()
-    city = st.text_input("City").strip()
-    jry = st.text_input("Jurisdiction").strip()
+        if self.airports[airport_id] is not None:
+            print("Error: Airport ID already exists!")
+            return
 
-    if st.button("Add Airport"):
-        if id >= 0 and name and city and jry:
-            flight_system.add_airport(int(id), name, city, jry)
+        self.airports[airport_id] = Airport(airport_id, name, city, country)
+        print("Airport added successfully.")
+
+    def add_route(self, source_id, destination_id, distance, cost, time):
+        if (
+            source_id >= self.num_airports or
+            destination_id >= self.num_airports or
+            source_id < 0 or destination_id < 0
+        ):
+            print("Error: Invalid Airport IDs for the route!")
+            return
+
+        if self.airports[source_id] is None or self.airports[destination_id] is None:
+            print("Error: One or both airports do not exist!")
+            return
+
+        new_node = AdjNode(destination_id, distance, cost, time)
+        new_node.next = self.adjacency_list[source_id].head
+        self.adjacency_list[source_id].head = new_node
+        print("Route added successfully.")
+
+    def dijkstra(self, start_id, dest_id, criterion):
+        inf = math.inf
+        values = [inf] * self.num_airports
+        previous = [-1] * self.num_airports
+        visited = [False] * self.num_airports
+
+        values[start_id] = 0
+
+        for _ in range(self.num_airports):
+            current = -1
+            min_value = inf
+
+            for i in range(self.num_airports):
+                if not visited[i] and values[i] < min_value:
+                    current = i
+                    min_value = values[i]
+
+            if current == -1:
+                break
+
+            visited[current] = True
+
+            neighbor = self.adjacency_list[current].head
+            while neighbor:
+                new_value = values[current]
+                if criterion == "distance":
+                    new_value += neighbor.distance
+                elif criterion == "cost":
+                    new_value += neighbor.cost
+                elif criterion == "time":
+                    new_value += neighbor.time
+
+                if new_value < values[neighbor.airport_id]:
+                    values[neighbor.airport_id] = new_value
+                    previous[neighbor.airport_id] = current
+
+                neighbor = neighbor.next
+
+        if values[dest_id] == inf:
+            print(f"No path exists from Airport {start_id} to Airport {dest_id}.")
         else:
-            st.error("Error: Please fill out all fields correctly.")
+            print(f"Optimal path ({criterion}): {values[dest_id]}")
+            print("Path: ", end="")
+            self.print_path(previous, dest_id)
+            print()
 
-elif choice == "Add Route":
-    st.subheader("Add Route")
-    source = st.number_input("Source Airport ID", min_value=0, step=1)
-    dest = st.number_input("Destination Airport ID", min_value=0, step=1)
-    distance = st.number_input("Distance", min_value=0.0, step=0.1)
-    cost = st.number_input("Cost", min_value=0.0, step=0.1)
-    time = st.number_input("Time", min_value=0.0, step=0.1)
-    if st.button("Add Route"):
-        flight_system.add_route(source, dest, distance, cost, time)
+    def print_path(self, previous, current_id):
+        if current_id == -1:
+            return
 
-elif choice == "Find Path":
-    st.subheader("Find Path")
-    start = st.number_input("Starting Airport ID", min_value=0, step=1)
-    end = st.number_input("Destination Airport ID", min_value=0, step=1)
-    optimize = st.radio("Optimize for", ["Distance", "Cost", "Time"])
-    if st.button("Find Path"):
-        if optimize == "Distance":
-            flight_system.find_shortest_path(start, end)
-        elif optimize == "Cost":
-            flight_system.find_shortest_path(start, end, optimize_cost=True)
-        elif optimize == "Time":
-            flight_system.find_shortest_path(start, end, optimize_time=True)
+        self.print_path(previous, previous[current_id])
+        if self.airports[current_id]:
+            print(self.airports[current_id].name, end=" ")
+        else:
+            print(current_id, end=" ")
 
-elif choice == "Save/Load Routes":
-    st.subheader("Save or Load Routes")
-    save_filename = st.text_input("Save filename")
-    if st.button("Save Routes"):
-        flight_system.save_routes(save_filename)
+# Example usage
+if __name__ == "__main__":
+    max_airports = 1000
+    graph = FlightGraph(max_airports)
+    graph.load_airports_from_csv("route.csv")
 
-    load_filename = st.text_input("Load filename")
-    if st.button("Load Routes"):
-        flight_system.load_routes(load_filename)
+    while True:
+        print("\nMenu:")
+        print("1. Add Airport")
+        print("2. Add Route")
+        print("3. Find Optimal Path")
+        print("4. Exit")
 
-elif choice == "View Airports":
-    st.subheader("View Airports")
-    if flight_system.airports:
-        for airport_id, airport in flight_system.airports.items():
-            st.write(f"ID: {airport_id}, Name: {airport.name}, City: {airport.city}, Jurisdiction: {airport.jry}")
-    else:
-        st.info("No airports added yet.")
+        choice = input("Enter your choice: ")
+        if choice == "1":
+            airport_id = int(input("Enter Airport ID: "))
+            name = input("Enter Airport Name: ")
+            city = input("Enter City: ")
+            country = input("Enter Country: ")
+            graph.add_airport(airport_id, name, city, country)
+        elif choice == "2":
+            source = int(input("Enter Source Airport ID: "))
+            destination = int(input("Enter Destination Airport ID: "))
+            distance = float(input("Enter Distance: "))
+            cost = float(input("Enter Cost: "))
+            time = float(input("Enter Time: "))
+            graph.add_route(source, destination, distance, cost, time)
+        elif choice == "3":
+            source = int(input("Enter Source Airport ID: "))
+            destination = int(input("Enter Destination Airport ID: "))
+            criterion = input("Enter Criterion (distance/cost/time): ")
+            graph.dijkstra(source, destination, criterion)
+        elif choice == "4":
+            print("Thank you for using the Flight Route Optimization System!")
+            break
+        else:
+            print("Invalid choice. Please try again.")
